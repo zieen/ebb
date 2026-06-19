@@ -124,6 +124,10 @@ mod tests {
             provider_for_model("claude-sonnet-4-5-20250929"),
             Some(Provider::Anthorpic)
         );
+        assert_eq!(
+            provider_for_model("deepseek-v4-flash"),
+            Some(Provider::DeepSeek)
+        );
         assert_eq!(provider_for_model("unknown-1"), None);
     }
 

@@ -1,6 +1,6 @@
 use crate::llm::{
     anthorpic, gemini,
-    model_list::{is_anthorpic_model, is_gemini_model, is_openai_model},
+    model_list::{is_anthorpic_model, is_deepseek_model, is_gemini_model, is_openai_model},
     openai,
 };
 
@@ -113,6 +113,9 @@ pub fn provider_for_model(model: &str) -> Option<Provider> {
     }
     if is_anthorpic_model(model) {
         return Some(Provider::Anthorpic);
+    }
+    if is_deepseek_model(model) {
+        return Some(Provider::DeepSeek);
     }
     None
 }
