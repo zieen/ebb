@@ -1,7 +1,7 @@
 use std::{
     env, fs,
     io::{self, BufRead, Write},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use dotenv::dotenv;
@@ -12,11 +12,11 @@ mod service;
 
 #[tokio::main]
 async fn main() {
-    dotenv().ok();
+    load_global_config().ok();
     let args: Vec<String> = env::args().collect();
 
     if args.len() == 2 && args[1] == "setup" {
-        if let Err(err) = run_setup(Path::new(".env")) {
+        if let Err(err) = run_setup() {
             eprintln!("Setup failed: {err}");
             std::process::exit(1);
         }
@@ -49,13 +49,24 @@ async fn main() {
     }
 }
 
-fn run_setup(config_path: &Path) -> io::Result<()> {
+fn load_global_config() -> io::Result<()> {
+    let config_path = user_config_path()?;
+    if config_path.is_file() {
+        dotenv::from_path(&config_path).ok();
+    } else {
+        dotenv().ok();
+    }
+    Ok(())
+}
+
+fn run_setup() -> io::Result<()> {
+    let config_path = user_config_path()?;
     let stdin = io::stdin();
     let mut reader = io::BufReader::new(stdin.lock());
     let stdout = io::stdout();
     let mut writer = stdout.lock();
 
-    run_setup_with_io(&mut reader, &mut writer, config_path)
+    run_setup_with_io(&mut reader, &mut writer, &config_path)
 }
 
 fn run_setup_with_io<R: BufRead, W: Write>(
@@ -120,6 +131,9 @@ fn prompt_value<R: BufRead, W: Write>(
 }
 
 fn save_setup(config_path: &Path, vendor: &str, api_key: &str) -> io::Result<()> {
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
     let existing = fs::read_to_string(config_path).unwrap_or_default();
     let env_key = vendor_api_key_var(vendor).ok_or_else(|| {
         io::Error::new(
@@ -133,6 +147,27 @@ fn save_setup(config_path: &Path, vendor: &str, api_key: &str) -> io::Result<()>
     let updated = upsert_env_line(&updated, env_key, api_key);
 
     fs::write(config_path, updated)
+}
+
+fn user_config_path() -> io::Result<PathBuf> {
+    let home = env::var_os("HOME").map(PathBuf::from);
+    let xdg = env::var_os("XDG_CONFIG_HOME").map(PathBuf::from);
+    config_path_from_env(home.as_deref(), xdg.as_deref())
+}
+
+fn config_path_from_env(home_dir: Option<&Path>, xdg_config_home: Option<&Path>) -> io::Result<PathBuf> {
+    let base_dir = if let Some(xdg) = xdg_config_home {
+        xdg.to_path_buf()
+    } else if let Some(home) = home_dir {
+        home.join(".config")
+    } else {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "Could not determine a user config directory",
+        ));
+    };
+
+    Ok(base_dir.join("ebb").join(".env"))
 }
 
 fn vendor_api_key_var(vendor: &str) -> Option<&'static str> {
@@ -246,6 +281,24 @@ mod tests {
         assert!(saved.contains("GEMINI_API_KEY=\"test-gemini-key\""));
 
         std::fs::remove_file(&config_path).unwrap();
-        std::fs::remove_dir(&temp_dir).unwrap();
+        std::fs::remove_dir_all(&temp_dir).unwrap();
+    }
+
+    #[test]
+    fn config_path_prefers_xdg_config_home() {
+        let path = config_path_from_env(
+            Some(Path::new("/tmp/home")),
+            Some(Path::new("/tmp/xdg-config")),
+        )
+        .unwrap();
+
+        assert_eq!(path, PathBuf::from("/tmp/xdg-config/ebb/.env"));
+    }
+
+    #[test]
+    fn config_path_falls_back_to_home_config_directory() {
+        let path = config_path_from_env(Some(Path::new("/tmp/home")), None).unwrap();
+
+        assert_eq!(path, PathBuf::from("/tmp/home/.config/ebb/.env"));
     }
 }
